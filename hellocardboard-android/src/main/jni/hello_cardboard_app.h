@@ -186,13 +186,26 @@ class HelloCardboardApp {
   Matrix4x4 modelview_projection_target_;
   Matrix4x4 modelview_projection_room_;
 
+  // Agrega esto debajo de modelview_projection_target_
+  Matrix4x4 modelview_projection_puntero_;
+  Matrix4x4 modelview_projection_cartel_;
+  Matrix4x4 modelview_projection_reinicio_; // <--- AGREGÁ ESTA LÍNEA
+
   TexturedMesh room_;
   Texture room_tex_;
 
-  TexturedMesh room_parte2_;
-  Texture room_tex_parte2_;
+  // para si tengo un room .obj que tenga dos Texturas
+//  TexturedMesh room_parte2_;
+//  Texture room_tex_parte2_;
 
   std::vector<TexturedMesh> target_object_meshes_;
+  // Agrega esto debajo de target_object_meshes_
+  ndk_hello_cardboard::TexturedMesh ui_mesh_; // Usaremos el mismo plano para todos
+  ndk_hello_cardboard::Texture tex_inicio_;
+  ndk_hello_cardboard::Texture tex_victoria_;
+  ndk_hello_cardboard::Texture tex_reinicio_;
+  ndk_hello_cardboard::Texture tex_puntero_;
+
   std::vector<Texture> target_object_not_selected_textures_;
   std::vector<Texture> target_object_selected_textures_;
   int cur_target_object_;
