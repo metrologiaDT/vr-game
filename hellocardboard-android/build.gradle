@@ -2,6 +2,7 @@ apply plugin: 'com.android.application'
 
 android {
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
     lintOptions {
         abortOnError = false
     }
@@ -43,8 +44,24 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.0' // (Esta línea ya la tenías, la versión puede variar)
+
+        // AGREGA LA LÍNEA AQUÍ:
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.20"
+    }
+}
+
 
 dependencies {
+
+
+
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     implementation 'androidx.appcompat:appcompat:1.6.1'
     // Android Mobile Vision
@@ -76,6 +93,12 @@ task deleteNdk(type: Delete) {
     delete "libraries/jni"
     delete "libraries/cardboard.h"
 }
+
+// Tarea vacía para engañar a Android Studio y evitar el error de Kotlin
+tasks.register("prepareKotlinBuildScriptModel") {
+    // No hace nada
+}
+
 
 preBuild.dependsOn(extractNdk)
 clean.dependsOn(deleteNdk)

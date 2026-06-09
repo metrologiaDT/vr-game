@@ -189,6 +189,9 @@ class HelloCardboardApp {
   TexturedMesh room_;
   Texture room_tex_;
 
+  TexturedMesh room_parte2_;
+  Texture room_tex_parte2_;
+
   std::vector<TexturedMesh> target_object_meshes_;
   std::vector<Texture> target_object_not_selected_textures_;
   std::vector<Texture> target_object_selected_textures_;

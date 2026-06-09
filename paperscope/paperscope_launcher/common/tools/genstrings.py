@@ -147,7 +147,7 @@ const char* GetLocalizedString(const std::string& key, JNIEnv* env) {
 """
 
     cc_header = open(
-        os.path.join(self._out_dir, ('%s_strings.h' % self._namespace)), 'w')
+        os.path.join(self._out_dir, ('%s_strings.h' % self._namespace)), 'w', encoding='utf-8')
     cc_header.write("""\
 // GENERATED CODE : DO NOT EDIT BY HAND
 #ifndef VR_APPS_CARDBOARD_DEMO_COMMON_TOOLS_%(namespace_upper)s_STRINGS_H_
@@ -185,7 +185,7 @@ const char* GetLocalizedStringForLocale(const std::string& key,
     # TODO(bwuest): Use a template library like cheetah or jinja2 to make this
     # generated code easier to read.
     cc_source = open(
-        os.path.join(self._out_dir, ('%s_strings.cc' % self._namespace)), 'w')
+        os.path.join(self._out_dir, ('%s_strings.cc' % self._namespace)), 'w', encoding='utf-8')
     cc_source.write(
         """\
 // GENERATED CODE : DO NOT EDIT BY HAND
@@ -285,7 +285,7 @@ const char* GetLocalizedStringForLocale(const std::string& key,
     if not os.path.exists(self._out_dir):
       os.makedirs(self._out_dir)
     strings_class = open(
-        os.path.join(self._out_dir, ('%s.java' % 'Strings')), 'w')
+        os.path.join(self._out_dir, ('%s.java' % 'Strings')), 'w', encoding='utf-8')
     strings_class.write('package %s;\n\n' % self._namespace)
 
     strings_class.write('import java.util.HashMap;\n')
@@ -378,7 +378,7 @@ const char* GetLocalizedStringForLocale(const std::string& key,
         Map of key/value pairs of localized strings.
     """
     parsed_strings = {}
-    strings_file = open(resource_file, 'r')
+    strings_file = open(resource_file, 'r', encoding='utf-8')
     for line in strings_file:
       match = re.match(r'"([a-zA-Z0-9_]*)"\s*=\s*"(.*)";$', line)
       if match:

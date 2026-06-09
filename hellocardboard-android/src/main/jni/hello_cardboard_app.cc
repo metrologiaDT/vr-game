@@ -25,6 +25,7 @@
 #include <fstream>
 
 #include "cardboard.h"
+#include <chrono>  // <--- AGREGA ESTA LÍNEA AQUÍ
 
 namespace ndk_hello_cardboard {
 
@@ -51,6 +52,17 @@ constexpr float kAngleLimit = 0.2f;
 
 // Number of different possible targets
 constexpr int kTargetMeshCount = 3;
+
+// --- VARIABLES DE ANIMACIÓN Y POSICIÓN JUEGO COGNITIVO ---
+    std::array<float, 3> g_current_target_pos = {0.0f, 0.0f, -3.0f};
+    bool g_is_animating = false;
+    float g_current_scale = 1.0f;
+    float g_current_angle = 0.0f;
+
+// NUEVAS VARIABLES DE PROGRESO
+    int g_score = 0;
+    int g_current_level = 1;
+// ---------------------------------------------------------
 
 // Simple shaders to render .obj files without any lighting.
 constexpr const char* kObjVertexShader =
@@ -137,10 +149,26 @@ void HelloCardboardApp::OnSurfaceCreated(JNIEnv* env) {
 
   CHECKGLERROR("Obj program params");
 
-  HELLOCARDBOARD_CHECK(room_.Initialize(obj_position_param_, obj_uv_param_,
-                                        "CubeRoom.obj", asset_mgr_));
-  HELLOCARDBOARD_CHECK(
-      room_tex_.Initialize(env, java_asset_mgr_, "CubeRoom_BakedDiffuse.png"));
+//  HELLOCARDBOARD_CHECK(room_.Initialize(obj_position_param_, obj_uv_param_,
+//                                        "CubeRoom.obj", asset_mgr_));
+
+
+    //HELLOCARDBOARD_CHECK(
+    //    room_tex_.Initialize(env, java_asset_mgr_, "CubeRoom_BakedDiffuse.png"));
+
+// Cargar parte 1
+    HELLOCARDBOARD_CHECK(room_.Initialize(obj_position_param_, obj_uv_param_,
+                                          "Bar1.obj", asset_mgr_));
+    HELLOCARDBOARD_CHECK(
+            room_tex_.Initialize(env, java_asset_mgr_, "Bar_A_BaseColor.png"));
+
+    // Cargar parte 2
+    HELLOCARDBOARD_CHECK(room_parte2_.Initialize(obj_position_param_, obj_uv_param_,
+                                                 "Bar2.obj", asset_mgr_));
+    HELLOCARDBOARD_CHECK(
+            room_tex_parte2_.Initialize(env, java_asset_mgr_, "Bar_B_BaseColor.png"));
+
+
   HELLOCARDBOARD_CHECK(target_object_meshes_[0].Initialize(
       obj_position_param_, obj_uv_param_, "Icosahedron.obj", asset_mgr_));
   HELLOCARDBOARD_CHECK(target_object_not_selected_textures_[0].Initialize(
@@ -183,6 +211,62 @@ void HelloCardboardApp::OnDrawFrame() {
   // Incorporate the floor height into the head_view
   head_view_ =
       head_view_ * GetTranslationMatrix({0.0f, kDefaultFloorHeight, 0.0f});
+
+// Incorporate the floor height into the head_view
+  head_view_ =
+          head_view_ * GetTranslationMatrix({0.0f, kDefaultFloorHeight, 0.0f});
+
+  // ==========================================================
+  // INICIO DE LÓGICA DE JUEGO: DWELL CLICK Y ANIMACIÓN
+  // ==========================================================
+  static auto start_look_time = std::chrono::steady_clock::now();
+  static auto anim_start_time = std::chrono::steady_clock::now();
+  static bool was_pointing = false;
+  const int DWELL_TIME_MS = 2000;         // 2 segundos mirando para atrapar
+  const float ANIM_DURATION_MS = 1000.0f; // 1 segundo de animación
+
+  if (g_is_animating) {
+    auto now = std::chrono::steady_clock::now();
+    float elapsed_anim = std::chrono::duration_cast<std::chrono::milliseconds>(now - anim_start_time).count();
+
+    if (elapsed_anim >= ANIM_DURATION_MS) {
+      // La animación terminó. El objeto se hizo diminuto. Saltamos de posición.
+      g_is_animating = false;
+      HideTarget();
+    } else {
+      // Calculamos el progreso de la animación (de 0.0 a 1.0)
+      float progress = elapsed_anim / ANIM_DURATION_MS;
+      g_current_scale = 1.0f - progress;            // Se achica de 1.0 a 0.0
+      g_current_angle = progress * 3.14159f * 4.0f; // 2 giros completos
+    }
+  } else {
+    // Si no hay animación, verificamos la mirada
+    if (IsPointingAtTarget()) {
+      if (!was_pointing) {
+        start_look_time = std::chrono::steady_clock::now();
+        was_pointing = true;
+      } else {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_look_time).count();
+        if (elapsed >= DWELL_TIME_MS) {
+          // ¡Lo miró 2 segundos! Iniciar animación
+          g_is_animating = true;
+          anim_start_time = std::chrono::steady_clock::now();
+          was_pointing = false;
+        }
+      }
+    } else {
+      was_pointing = false;
+    }
+  }
+
+  // Actualizamos la posición y rotación del objeto en el mundo 3D
+  std::array<float, 4> rot_quat = {0.0f, std::sin(g_current_angle / 2.0f), 0.0f, std::cos(g_current_angle / 2.0f)};
+  model_target_ = GetTranslationMatrix(g_current_target_pos) * Quatf::FromXYZW(&rot_quat[0]).ToMatrix();
+  // ==========================================================
+
+  // Bind buffer
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
 
   // Bind buffer
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
@@ -388,6 +472,14 @@ void HelloCardboardApp::DrawTarget() {
   glUseProgram(obj_program_);
 
   std::array<float, 16> target_array = modelview_projection_target_.ToGlArray();
+
+  // --- APLICAR LA ESCALA DE LA ANIMACIÓN ---
+  // Al multiplicar las primeras 3 columnas de la matriz, achicamos el objeto
+  for (int i = 0; i < 12; ++i) {
+    target_array[i] *= g_current_scale;
+  }
+  // -----------------------------------------
+
   glUniformMatrix4fv(obj_modelview_projection_param_, 1, GL_FALSE,
                      target_array.data());
 
@@ -408,23 +500,68 @@ void HelloCardboardApp::DrawRoom() {
   glUniformMatrix4fv(obj_modelview_projection_param_, 1, GL_FALSE,
                      room_array.data());
 
+ // Dibujar la primera parte
   room_tex_.Bind();
   room_.Draw();
+
+
+  // Dibujar la segunda parte (comparte la misma matriz de posición,
+  // así que encajará perfectamente en su lugar)
+  room_tex_parte2_.Bind();
+  room_parte2_.Draw();
+
 
   CHECKGLERROR("DrawRoom");
 }
 
-void HelloCardboardApp::HideTarget() {
-  cur_target_object_ = RandomUniformInt(kTargetMeshCount);
+    void HelloCardboardApp::HideTarget() {
+      // 1. Cambia la forma del objeto al azar para dar variedad visual
+      cur_target_object_ = RandomUniformInt(kTargetMeshCount);
 
-  float angle = RandomUniformFloat(-M_PI, M_PI);
-  float distance = RandomUniformFloat(kMinTargetDistance, kMaxTargetDistance);
-  float height = RandomUniformFloat(kMinTargetHeight, kMaxTargetHeight);
-  std::array<float, 3> target_position = {std::cos(angle) * distance, height,
-                                          std::sin(angle) * distance};
+      // 2. Sumamos un punto porque acabamos de encontrar un objeto
+      g_score++;
 
-  model_target_ = GetTranslationMatrix(target_position);
-}
+      // 3. Evaluamos el nivel actual según el puntaje
+      if (g_score > 6) {
+        g_current_level = 3;
+      } else if (g_score > 3) {
+        g_current_level = 2;
+      } else {
+        g_current_level = 1;
+      }
+
+      // 4. Calculamos la nueva posición dependiendo del nivel
+      static int position_index = 0;
+
+      if (g_current_level == 1) {
+        // NIVEL 1 (Fácil): Posiciones muy frontales, poco movimiento de cuello.
+        // Eje X contenido entre -1.5 y 1.5. Eje Y a la altura de los ojos (0.0).
+        if (position_index == 0) g_current_target_pos = {0.0f, 0.0f, -3.0f};
+        else if (position_index == 1) g_current_target_pos = {-1.5f, 0.0f, -3.0f};
+        else g_current_target_pos = {1.5f, 0.0f, -3.0f};
+
+      } else if (g_current_level == 2) {
+        // NIVEL 2 (Medio): Posiciones más amplias hacia los lados (X = 2.5)
+        // y obligando a mirar ligeramente hacia arriba y abajo (Y = 0.5 a -0.5).
+        if (position_index == 0) g_current_target_pos = {-2.5f, 0.5f, -3.0f};
+        else if (position_index == 1) g_current_target_pos = {2.5f, -0.5f, -3.0f};
+        else g_current_target_pos = {0.0f, 1.0f, -3.0f};
+
+      } else {
+        // NIVEL 3 (Difícil): Exige rotar la cabeza casi 90 grados a los lados
+        // (Z se acerca a -1.0 y X crece a 3.5), o mirar muy arriba.
+        if (position_index == 0) g_current_target_pos = {-3.5f, 1.5f, -1.5f};
+        else if (position_index == 1) g_current_target_pos = {3.5f, -1.0f, -1.5f};
+        else g_current_target_pos = {0.0f, 2.0f, -2.0f};
+      }
+
+      // Avanzamos el índice para la próxima vez (0, 1, 2)
+      position_index = (position_index + 1) % 3;
+
+      // Restaurar el tamaño y ángulo para el nuevo objeto que aparece
+      g_current_scale = 1.0f;
+      g_current_angle = 0.0f;
+    }
 
 bool HelloCardboardApp::IsPointingAtTarget() {
   // Compute vectors pointing towards the reticle and towards the target object
