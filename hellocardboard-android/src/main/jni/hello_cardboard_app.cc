@@ -39,7 +39,7 @@ constexpr float kMaxTargetDistance = 3.5f;
 constexpr float kMinTargetHeight = 0.5f;
 constexpr float kMaxTargetHeight = kMinTargetHeight + 3.0f;
 
-constexpr float kDefaultFloorHeight = -1.7f;
+constexpr float kDefaultFloorHeight = -0.1f;
 
 // 6 Hz cutoff frequency for the velocity filter of the head tracker.
 constexpr int kVelocityFilterCutoffFrequency = 6;
@@ -59,9 +59,17 @@ constexpr int kTargetMeshCount = 3;
     float g_current_scale = 1.0f;
     float g_current_angle = 0.0f;
 
-// NUEVAS VARIABLES DE PROGRESO
+// NUEVAS VARIABLES DE PROGRESO Y ESTADOS
     int g_score = 0;
     int g_current_level = 1;
+    const int MAX_PELOTAS = 10;
+
+// Estados posibles del juego
+    enum GameState { PANTALLA_INICIO, JUGANDO, VICTORIA, ESPERANDO_REINICIO };
+    GameState g_game_state = PANTALLA_INICIO;
+
+// Temporizador para el reinicio
+    auto g_win_time = std::chrono::steady_clock::now();
 // ---------------------------------------------------------
 
 // Simple shaders to render .obj files without any lighting.
@@ -149,24 +157,37 @@ void HelloCardboardApp::OnSurfaceCreated(JNIEnv* env) {
 
   CHECKGLERROR("Obj program params");
 
-//  HELLOCARDBOARD_CHECK(room_.Initialize(obj_position_param_, obj_uv_param_,
-//                                        "CubeRoom.obj", asset_mgr_));
+  HELLOCARDBOARD_CHECK(room_.Initialize(obj_position_param_, obj_uv_param_,
+                                        "salaOBJ.obj", asset_mgr_));
 
 
-    //HELLOCARDBOARD_CHECK(
-    //    room_tex_.Initialize(env, java_asset_mgr_, "CubeRoom_BakedDiffuse.png"));
-
-// Cargar parte 1
-    HELLOCARDBOARD_CHECK(room_.Initialize(obj_position_param_, obj_uv_param_,
-                                          "Bar1.obj", asset_mgr_));
     HELLOCARDBOARD_CHECK(
-            room_tex_.Initialize(env, java_asset_mgr_, "Bar_A_BaseColor.png"));
+        room_tex_.Initialize(env, java_asset_mgr_, "textura_sala.png"));
+
+
+// Cargar parte 1 - (room con textura1)
+//    HELLOCARDBOARD_CHECK(room_.Initialize(obj_position_param_, obj_uv_param_,
+//                                          "Bar1.obj", asset_mgr_));
+
+//    HELLOCARDBOARD_CHECK(
+//            room_tex_.Initialize(env, java_asset_mgr_, "Bar_A_BaseColor.png"));
 
     // Cargar parte 2
-    HELLOCARDBOARD_CHECK(room_parte2_.Initialize(obj_position_param_, obj_uv_param_,
-                                                 "Bar2.obj", asset_mgr_));
-    HELLOCARDBOARD_CHECK(
-            room_tex_parte2_.Initialize(env, java_asset_mgr_, "Bar_B_BaseColor.png"));
+//    HELLOCARDBOARD_CHECK(room_parte2_.Initialize(obj_position_param_, obj_uv_param_,
+//                                                 "Bar2.obj", asset_mgr_));
+
+//    HELLOCARDBOARD_CHECK(
+//            room_tex_parte2_.Initialize(env, java_asset_mgr_, "Bar_B_BaseColor.png"));
+
+// Cargar el plano generado por código
+  HELLOCARDBOARD_CHECK(ui_mesh_.Initialize(
+          obj_position_param_, obj_uv_param_, "plano_ui.obj", asset_mgr_));
+
+  // Cargar las texturas 2D
+  HELLOCARDBOARD_CHECK(tex_inicio_.Initialize(env, java_asset_mgr_, "inicio.png"));
+  HELLOCARDBOARD_CHECK(tex_victoria_.Initialize(env, java_asset_mgr_, "victoria.png"));
+  HELLOCARDBOARD_CHECK(tex_reinicio_.Initialize(env, java_asset_mgr_, "reinicio.png"));
+  HELLOCARDBOARD_CHECK(tex_puntero_.Initialize(env, java_asset_mgr_, "puntero.png"));
 
 
   HELLOCARDBOARD_CHECK(target_object_meshes_[0].Initialize(
@@ -212,35 +233,40 @@ void HelloCardboardApp::OnDrawFrame() {
   head_view_ =
       head_view_ * GetTranslationMatrix({0.0f, kDefaultFloorHeight, 0.0f});
 
-// Incorporate the floor height into the head_view
-  head_view_ =
-          head_view_ * GetTranslationMatrix({0.0f, kDefaultFloorHeight, 0.0f});
 
   // ==========================================================
-  // INICIO DE LÓGICA DE JUEGO: DWELL CLICK Y ANIMACIÓN
+  // INICIO DE LÓGICA DE JUEGO: ESTADOS, DWELL CLICK Y ANIMACIÓN
   // ==========================================================
   static auto start_look_time = std::chrono::steady_clock::now();
   static auto anim_start_time = std::chrono::steady_clock::now();
   static bool was_pointing = false;
-  const int DWELL_TIME_MS = 2000;         // 2 segundos mirando para atrapar
-  const float ANIM_DURATION_MS = 1000.0f; // 1 segundo de animación
+  const int DWELL_TIME_MS = 2000;
+  const float ANIM_DURATION_MS = 1000.0f;
 
-  if (g_is_animating) {
+  // Lógica para cambiar de VICTORIA a ESPERANDO_REINICIO tras 3 segundos
+  if (g_game_state == VICTORIA) {
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed_since_win = std::chrono::duration_cast<std::chrono::seconds>(now - g_win_time).count();
+    if (elapsed_since_win >= 3) {
+      g_game_state = ESPERANDO_REINICIO;
+    }
+  }
+
+  // Animación del objeto
+  if (g_is_animating && g_game_state == JUGANDO) {
     auto now = std::chrono::steady_clock::now();
     float elapsed_anim = std::chrono::duration_cast<std::chrono::milliseconds>(now - anim_start_time).count();
 
     if (elapsed_anim >= ANIM_DURATION_MS) {
-      // La animación terminó. El objeto se hizo diminuto. Saltamos de posición.
       g_is_animating = false;
       HideTarget();
     } else {
-      // Calculamos el progreso de la animación (de 0.0 a 1.0)
       float progress = elapsed_anim / ANIM_DURATION_MS;
-      g_current_scale = 1.0f - progress;            // Se achica de 1.0 a 0.0
-      g_current_angle = progress * 3.14159f * 4.0f; // 2 giros completos
+      g_current_scale = 1.0f - progress;
+      g_current_angle = progress * 3.14159f * 4.0f;
     }
   } else {
-    // Si no hay animación, verificamos la mirada
+    // Si lo está mirando
     if (IsPointingAtTarget()) {
       if (!was_pointing) {
         start_look_time = std::chrono::steady_clock::now();
@@ -249,9 +275,14 @@ void HelloCardboardApp::OnDrawFrame() {
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_look_time).count();
         if (elapsed >= DWELL_TIME_MS) {
-          // ¡Lo miró 2 segundos! Iniciar animación
-          g_is_animating = true;
-          anim_start_time = std::chrono::steady_clock::now();
+
+          if (g_game_state == JUGANDO) {
+            g_is_animating = true;
+            anim_start_time = std::chrono::steady_clock::now();
+          } else {
+            // Si no está jugando (ej. inicio o reinicio), activa la acción directo sin animación
+            HideTarget();
+          }
           was_pointing = false;
         }
       }
@@ -260,9 +291,32 @@ void HelloCardboardApp::OnDrawFrame() {
     }
   }
 
-  // Actualizamos la posición y rotación del objeto en el mundo 3D
+  // Actualizamos la posición y rotación del objeto ACTIVO
   std::array<float, 4> rot_quat = {0.0f, std::sin(g_current_angle / 2.0f), 0.0f, std::cos(g_current_angle / 2.0f)};
-  model_target_ = GetTranslationMatrix(g_current_target_pos) * Quatf::FromXYZW(&rot_quat[0]).ToMatrix();
+
+  // Dependiendo del estado, la "mirilla" apunta a diferentes lugares
+  if (g_game_state == PANTALLA_INICIO) {
+    // El cartel de inicio flotará frente al jugador
+    model_target_ = GetTranslationMatrix({0.0f, 1.5f, -2.5f});
+  } else if (g_game_state == VICTORIA) {
+    // El cartel de victoria flota en el centro
+    model_target_ = GetTranslationMatrix({0.0f, 1.5f, -2.5f});
+  } else if (g_game_state == ESPERANDO_REINICIO) {
+    // Dibujamos el cartel de victoria arriba
+    std::array<float, 16> cartel_array = modelview_projection_cartel_.ToGlArray();
+    glUniformMatrix4fv(obj_modelview_projection_param_, 1, GL_FALSE, cartel_array.data());
+    tex_victoria_.Bind();
+    ui_mesh_.Draw();
+
+    // Dibujamos el botón de reinicio más abajo
+    std::array<float, 16> reinicio_array = modelview_projection_reinicio_.ToGlArray();
+    glUniformMatrix4fv(obj_modelview_projection_param_, 1, GL_FALSE, reinicio_array.data());
+    tex_reinicio_.Bind();
+    ui_mesh_.Draw();
+  } else {
+    // Está JUGANDO, la matriz sigue a la pelota
+    model_target_ = GetTranslationMatrix(g_current_target_pos) * Quatf::FromXYZW(&rot_quat[0]).ToMatrix();
+  }
   // ==========================================================
 
   // Bind buffer
@@ -290,7 +344,28 @@ void HelloCardboardApp::OnDrawFrame() {
         GetMatrixFromGlArray(projection_matrices_[eye]);
     Matrix4x4 modelview_target = eye_view * model_target_;
     modelview_projection_target_ = projection_matrix * modelview_target;
+
+
+    // Debajo de modelview_projection_target_ = projection_matrix * modelview_target;
+
+    // 1. MATRIZ DEL PUNTERO (Fijo a 1.5 mts de la cara)
+    Matrix4x4 model_puntero = GetTranslationMatrix({0.0f, 0.0f, -1.5f});
+    // Achicamos el tamaño del plano matemático para que sea un cursor pequeño (escala al 5%)
+    model_puntero.m[0][0] = 0.05f;
+    model_puntero.m[1][1] = 0.05f;
+    model_puntero.m[2][2] = 0.05f;
+      modelview_projection_puntero_ = projection_matrix * (eye_matrix * model_puntero);
+
+
+    // 2. MATRIZ DEL CARTEL (Flotando en el mundo estático)
+    Matrix4x4 model_cartel = GetTranslationMatrix({0.0f, 1.5f, -2.5f});
+    modelview_projection_cartel_ = projection_matrix * (eye_view * model_cartel);
+
+    // 3. MATRIZ DEL BOTÓN DE REINICIO (NUEVO)
+    Matrix4x4 model_reinicio = GetTranslationMatrix({0.0f, 0.5f, -2.5f});
+    modelview_projection_reinicio_ = projection_matrix * (eye_view * model_reinicio);
     modelview_projection_room_ = projection_matrix * eye_view;
+
 
     // Draw room and target
     DrawWorld();
@@ -465,7 +540,48 @@ Matrix4x4 HelloCardboardApp::GetPose() {
 
 void HelloCardboardApp::DrawWorld() {
   DrawRoom();
-  DrawTarget();
+
+  glUseProgram(obj_program_);
+
+  // Lógica para decidir qué dibujar según el estado (ver variables de la respuesta anterior)
+  if (g_game_state == PANTALLA_INICIO) {
+    std::array<float, 16> cartel_array = modelview_projection_cartel_.ToGlArray();
+    glUniformMatrix4fv(obj_modelview_projection_param_, 1, GL_FALSE, cartel_array.data());
+    tex_inicio_.Bind();
+    ui_mesh_.Draw();
+  }
+  else if (g_game_state == VICTORIA) {
+    std::array<float, 16> cartel_array = modelview_projection_cartel_.ToGlArray();
+    glUniformMatrix4fv(obj_modelview_projection_param_, 1, GL_FALSE, cartel_array.data());
+    tex_victoria_.Bind();
+    ui_mesh_.Draw();
+  }
+  else if (g_game_state == ESPERANDO_REINICIO) {
+    // Dibujamos victoria arriba...
+    std::array<float, 16> cartel_array = modelview_projection_cartel_.ToGlArray();
+    glUniformMatrix4fv(obj_modelview_projection_param_, 1, GL_FALSE, cartel_array.data());
+    tex_victoria_.Bind();
+    ui_mesh_.Draw();
+
+    // ...y el botón de reinicio más abajo
+    Matrix4x4 btn_mat = GetTranslationMatrix({0.0f, 0.5f, -2.5f});
+    // (Nota: necesitas calcular el modelview_projection_btn en OnDrawFrame igual que el cartel)
+    // tex_reinicio_.Bind();
+    // ui_mesh_.Draw();
+  }
+  else if (g_game_state == JUGANDO) {
+    // Llamamos a tu código original de dibujo de la pelota animada
+    DrawTarget();
+  }
+
+  // --- DIBUJAR EL PUNTERO SIEMPRE AL FINAL (Para que quede superpuesto) ---
+  // IMPORTANTE: Desactivar la prueba de profundidad momentáneamente para que el puntero atraviese paredes
+  glDisable(GL_DEPTH_TEST);
+  std::array<float, 16> puntero_array = modelview_projection_puntero_.ToGlArray();
+  glUniformMatrix4fv(obj_modelview_projection_param_, 1, GL_FALSE, puntero_array.data());
+  tex_puntero_.Bind();
+  ui_mesh_.Draw();
+  glEnable(GL_DEPTH_TEST); // Volver a activar para el siguiente frame
 }
 
 void HelloCardboardApp::DrawTarget() {
@@ -507,60 +623,58 @@ void HelloCardboardApp::DrawRoom() {
 
   // Dibujar la segunda parte (comparte la misma matriz de posición,
   // así que encajará perfectamente en su lugar)
-  room_tex_parte2_.Bind();
-  room_parte2_.Draw();
+ // room_tex_parte2_.Bind();
+ // room_parte2_.Draw();
 
 
   CHECKGLERROR("DrawRoom");
 }
 
     void HelloCardboardApp::HideTarget() {
-      // 1. Cambia la forma del objeto al azar para dar variedad visual
-      cur_target_object_ = RandomUniformInt(kTargetMeshCount);
+        if (g_game_state == PANTALLA_INICIO) {
+            // Si estamos en el inicio y miramos el cartel, empieza el juego
+            g_game_state = JUGANDO;
+            g_score = 0;
+            g_current_target_pos = {0.0f, 0.0f, -3.0f}; // Posición de la 1ra pelota
+        } else if (g_game_state == JUGANDO) {
+            // Sumamos un punto
+            g_score++;
 
-      // 2. Sumamos un punto porque acabamos de encontrar un objeto
-      g_score++;
+            // ¿Ganó el juego?
+            if (g_score >= MAX_PELOTAS) {
+                g_game_state = VICTORIA;
+                g_win_time = std::chrono::steady_clock::now(); // Guardamos la hora en que ganó
+                return;
+            }
 
-      // 3. Evaluamos el nivel actual según el puntaje
-      if (g_score > 6) {
-        g_current_level = 3;
-      } else if (g_score > 3) {
-        g_current_level = 2;
-      } else {
-        g_current_level = 1;
-      }
+            // LISTA DE LAS 10 POSICIONES EXACTAS
+            // Ejes: X (Izquierda/Derecha), Y (Abajo/Arriba), Z (Profundidad, negativo es hacia adelante)
+            const float posiciones[10][3] = {
+                    { 0.0f,  0.0f, -3.0f}, // 1ra: Centro exacto (no se usa acá, se pone al iniciar)
+                    { 0.8f,  0.2f, -3.2f}, // 2da: Un poco corrida de la primera hacia la derecha y arriba
+                    {-1.2f, -0.4f, -2.8f}, // 3ra: Abajo a la izquierda
+                    { 1.5f,  0.5f, -3.5f}, // 4ta: Arriba a la derecha (exige un poco más)
+                    {-0.5f,  0.8f, -3.0f}, // 5ta: Arriba al centro-izquierda
+                    { 0.0f,  0.0f, -5.5f}, // 6ta: Bien centrada pero mucho MÁS LEJOS (-5.5 en Z)
+                    {-1.8f, -0.2f, -3.0f}, // 7ma: Izquierda exigida
+                    { 1.0f, -0.6f, -2.5f}, // 8va: Abajo a la derecha
+                    {-0.4f,  0.2f, -3.0f}, // 9na: Cerca, cómoda y casi centrada (para persona mayor)
+                    { 0.4f, -0.1f, -2.8f}  // 10ma: Cerca, cómoda y centrada del otro lado
+            };
 
-      // 4. Calculamos la nueva posición dependiendo del nivel
-      static int position_index = 0;
+            // Tomamos la posición correspondiente según el puntaje actual
+            g_current_target_pos = {posiciones[g_score][0], posiciones[g_score][1], posiciones[g_score][2]};
 
-      if (g_current_level == 1) {
-        // NIVEL 1 (Fácil): Posiciones muy frontales, poco movimiento de cuello.
-        // Eje X contenido entre -1.5 y 1.5. Eje Y a la altura de los ojos (0.0).
-        if (position_index == 0) g_current_target_pos = {0.0f, 0.0f, -3.0f};
-        else if (position_index == 1) g_current_target_pos = {-1.5f, 0.0f, -3.0f};
-        else g_current_target_pos = {1.5f, 0.0f, -3.0f};
+            // Reiniciamos los valores de la animación
+            g_current_scale = 1.0f;
+            g_current_angle = 0.0f;
 
-      } else if (g_current_level == 2) {
-        // NIVEL 2 (Medio): Posiciones más amplias hacia los lados (X = 2.5)
-        // y obligando a mirar ligeramente hacia arriba y abajo (Y = 0.5 a -0.5).
-        if (position_index == 0) g_current_target_pos = {-2.5f, 0.5f, -3.0f};
-        else if (position_index == 1) g_current_target_pos = {2.5f, -0.5f, -3.0f};
-        else g_current_target_pos = {0.0f, 1.0f, -3.0f};
-
-      } else {
-        // NIVEL 3 (Difícil): Exige rotar la cabeza casi 90 grados a los lados
-        // (Z se acerca a -1.0 y X crece a 3.5), o mirar muy arriba.
-        if (position_index == 0) g_current_target_pos = {-3.5f, 1.5f, -1.5f};
-        else if (position_index == 1) g_current_target_pos = {3.5f, -1.0f, -1.5f};
-        else g_current_target_pos = {0.0f, 2.0f, -2.0f};
-      }
-
-      // Avanzamos el índice para la próxima vez (0, 1, 2)
-      position_index = (position_index + 1) % 3;
-
-      // Restaurar el tamaño y ángulo para el nuevo objeto que aparece
-      g_current_scale = 1.0f;
-      g_current_angle = 0.0f;
+        } else if (g_game_state == ESPERANDO_REINICIO) {
+            // Si mira el botón de reinicio, reseteamos todo a cero
+            g_score = 0;
+            g_current_target_pos = {0.0f, 0.0f, -3.0f}; // Posición inicial
+            g_game_state = JUGANDO;
+        }
     }
 
 bool HelloCardboardApp::IsPointingAtTarget() {
